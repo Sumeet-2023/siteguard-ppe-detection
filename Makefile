@@ -2,15 +2,15 @@
 
 data:
 	bash scripts/download_data.sh
-	python scripts/voc_to_yolo.py --ann-dir data/shwd/annotations --out-dir data/shwd/labels
+	python scripts/prepare_shwd_raw.py --mirror-root data/shwd/helm/helm --out-root data/shwd_raw
 
 splits:
-	python scripts/make_splits.py --img-dir data/shwd/images
+	python scripts/make_splits.py --img-dir data/shwd_raw/images
 
 apply-splits:
-	python scripts/apply_splits.py \
-		--img-dir data/shwd/images --label-dir data/shwd/labels \
-		--out-root data/shwd
+	python scripts/apply_splits.py --splits configs/splits.json \
+		--img-dir data/shwd_raw/images --label-dir data/shwd_raw/labels \
+		--out-root data/shwd_final
 
 baseline:
 	python scripts/baseline_zeroshot.py

@@ -1,6 +1,6 @@
 data/
 runs/
-models/*.pt
+*.pt
 models/*.onnx
 *.pyc
 __pycache__/
@@ -9,6 +9,3 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .DS_Store
-reports/benchmark.json
-reports/benchmark.md
-configs/splits.json

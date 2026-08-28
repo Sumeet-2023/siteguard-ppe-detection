@@ -25,7 +25,10 @@ fi
 
 kaggle datasets download -d vodan37/yolo-helmethead -p "$DATA_DIR" --unzip
 
-echo "Downloaded to $DATA_DIR. Verify the directory layout matches:"
-echo "  $DATA_DIR/annotations/*.xml"
-echo "  $DATA_DIR/images/*.jpg"
-echo "Re-organise if the mirror's layout differs before running voc_to_yolo.py."
+echo "Downloaded to $DATA_DIR."
+echo "This mirror ships pre-converted to YOLO format (not VOC XML) at:"
+echo "  $DATA_DIR/helm/helm/images/{train,valid,test}"
+echo "  $DATA_DIR/helm/helm/labels/{train,valid,test}"
+echo "with classes {0: head, 1: helmet} and its own (naive, random) split."
+echo "Run scripts/prepare_shwd_raw.py to flatten it and remap classes to"
+echo "our {0: helmet, 1: head} convention before running make_splits.py."
