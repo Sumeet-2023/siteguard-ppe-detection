@@ -20,4 +20,45 @@ PPE compliance needs boxes trained on head-region semantics, not repurposed pers
 
 ## Phase 4/5 — Trained models
 
-*(pending — GPU training runs via `notebooks/colab_train.ipynb`, see README)*
+Trained on Colab (T4 GPU), 80 epochs, imgsz=640, on the honest pHash split (15,952 train /
+3,418 val / 3,419 test, 5.4% duplicates removed). Evaluated locally on CPU (this machine has no
+GPU) against the held-out test split — accuracy numbers are unaffected by device, latency numbers
+are CPU-only.
+
+| Model | Size (MB) | mAP50 | mAP50-95 | AP50 helmet | AP50 head | CPU p50 (ms) | CPU FPS |
+|---|---|---|---|---|---|---|---|
+| yolo11n | 5.5 | 0.9487 | 0.5795 | 0.9665 | 0.9309 | 82.59 | 10.1 |
+| yolo11s | 19.2 | 0.9619 | 0.6000 | 0.9738 | 0.9500 | 205.22 | 4.8 |
+
+Both models comfortably outperform the zero-shot baseline (as expected — they were trained for
+this task), and per-class AP shows the imbalance effect predicted in Phase 4: `head` (the majority
+class) still trails `helmet` on both models, though `copy_paste` augmentation kept the gap modest
+(~3.5pt on yolo11n, ~2.4pt on yolo11s) rather than the more severe ~19pt gap the original SHWD's
+12:1 imbalance would suggest — this mirror's dataset is less extreme (~2:1 head:helmet).
+
+yolo11s wins on every accuracy metric but is 2.5x slower on CPU (205ms vs 83ms) and 3.5x larger.
+For a CPU-only edge deployment, yolo11n's speed/accuracy tradeoff is compelling — it's within
+1.3pt mAP50 of yolo11s at less than half the latency.
+
+**Note:** `mAP50` here is on unseen `test` images, computed with `model.val()`; it differs slightly
+from `results.csv`'s in-training `val` split numbers (0.950/0.961) because those were measured
+against the validation split during/after training, not the held-out test split.
+
+## Phase 7 — PyTorch vs ONNX (yolo11s)
+
+Same weights, same test split, PyTorch checkpoint vs its FP32 ONNX export (opset 13,
+simplified), both on CPU.
+
+| Variant | Size (MB) | mAP50 | mAP50-95 | CPU p50 (ms) | CPU FPS |
+|---|---|---|---|---|---|
+| PyTorch | 19.2 | 0.9619 | 0.6000 | 185.62 | 5.4 |
+| ONNX FP32 | 37.9 | 0.9595 | 0.5929 | 146.10 | 6.8 |
+
+~27% CPU latency reduction (186ms → 146ms) for a 0.24pt mAP50 drop — a real, close-to-free
+deployment win, though the ONNX file itself is ~2x larger on disk (37.9 vs 19.2 MB) since it isn't
+using any of PyTorch's weight compression. `models/best.onnx` (used by the FastAPI service) is
+this ONNX export.
+
+## Naive vs honest split
+
+*(pending — would require retraining on a random image-level split for comparison; not yet run)*

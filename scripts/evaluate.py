@@ -27,8 +27,11 @@ def latency(model, imgsz: int, device: str, warmup=20, runs=100) -> dict:
 
 
 def evaluate(weights: Path, data: str, imgsz: int, device: str) -> dict:
+    has_gpu = torch.cuda.is_available()
+    eval_device = device if has_gpu else "cpu"
+
     model = YOLO(str(weights))
-    m = model.val(data=data, split="test", imgsz=imgsz, device=device, verbose=False)
+    m = model.val(data=data, split="test", imgsz=imgsz, device=eval_device, verbose=False)
 
     row = {"model": weights.parent.parent.name,
            "size_MB": round(weights.stat().st_size / 1e6, 1),
@@ -37,7 +40,8 @@ def evaluate(weights: Path, data: str, imgsz: int, device: str) -> dict:
     for i, ap in enumerate(m.box.ap50):
         row[f"AP50_{model.names[i]}"] = round(float(ap), 4)
 
-    row |= {f"gpu_{k}": v for k, v in latency(model, imgsz, device).items()}
+    if has_gpu:
+        row |= {f"gpu_{k}": v for k, v in latency(model, imgsz, device).items()}
     row |= {f"cpu_{k}": v for k, v in latency(model, imgsz, "cpu").items()}
     return row
 

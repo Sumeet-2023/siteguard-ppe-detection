@@ -1,5 +1,7 @@
 data/
 runs/
+yolon/
+yolos/
 *.pt
 models/*.onnx
 *.pyc

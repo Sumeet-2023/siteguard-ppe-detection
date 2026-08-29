@@ -4,9 +4,9 @@
 > is not wearing a hard hat. Tracks people across frames so a violation is reported once, not once
 > per frame.
 
-**Status:** data pipeline done (honest split verified: 22,789 images → 21,555 pHash groups, 5.4%
-duplicates caught), zero-shot baseline recorded. Training pending — this machine has no GPU, so
-Phase 4 runs via [`notebooks/colab_train.ipynb`](notebooks/colab_train.ipynb). See
+**Status:** data pipeline, zero-shot baseline, and both training runs (yolo11n + yolo11s, 80
+epochs on Colab T4) are done — yolo11s reaches 0.962 mAP50 on held-out test. ONNX export, video
+pipeline, and cross-dataset/phone-photo evaluation (Phase 6) are next. See
 [Definition of done](#definition-of-done).
 
 Dataset note: `vodan37/yolo-helmethead` on Kaggle ships pre-converted to YOLO format already
@@ -44,12 +44,17 @@ is a box-geometry mismatch — COCO `person` is full-body, SHWD ground truth is 
 region, so IoU ≥ 0.5 is essentially never reached. This is the case for training PPE-specific
 boxes rather than reusing generic person detection.
 
-**Trained models** *(pending GPU training — see `notebooks/colab_train.ipynb`)*
+**Trained models** — 80 epochs, imgsz=640, trained on Colab T4, evaluated on this (CPU-only)
+machine against the held-out test split (see `reports/benchmark.md` for full detail):
 
-| Model | Params | mAP50 | AP50 helmet | AP50 head | CPU p50 (ms) | GPU p50 (ms) | Size (MB) |
+| Model | Size (MB) | mAP50 | mAP50-95 | AP50 helmet | AP50 head | CPU p50 (ms) | CPU FPS |
 |---|---|---|---|---|---|---|---|
-| yolo11n | ~2.6M | TBD | TBD | TBD | TBD | TBD | TBD |
-| yolo11s | ~9.4M | TBD | TBD | TBD | TBD | TBD | TBD |
+| yolo11n | 5.5 | 0.9487 | 0.5795 | 0.9665 | 0.9309 | 82.59 | 10.1 |
+| yolo11s | 19.2 | 0.9619 | 0.6000 | 0.9738 | 0.9500 | 205.22 | 4.8 |
+
+yolo11s wins on every accuracy metric but is 2.5x slower and 3.5x larger. For CPU-only edge
+deployment, yolo11n is within 1.3pt mAP50 of yolo11s at less than half the latency — a real
+tradeoff, not a clear winner either way. GPU latency not yet measured (would need to run on Colab).
 
 ## Generalisation study
 
@@ -78,8 +83,13 @@ mAP numbers for both split strategies are reported below once training completes
 
 ## Failure analysis
 
-*(6–8 annotated failure cases go in `reports/failure_cases/`, each with a one-line caption —
-populate after Phase 5)*
+8 worst cases from the test split, auto-selected by `scripts/find_failure_cases.py` (greedy
+IoU-matching against ground truth, ranked by missed/extra/misclassified boxes) — captions and
+images in [`reports/failure_cases/`](reports/failure_cases/README.md). Two distinct failure modes
+emerge: **duplicate/overlapping boxes on densely packed heads** (consistent across camera angles
+and venues — an NMS/scale issue, not a data gap) and **color/shape over-generalization of
+"helmet"** onto other pale, rounded headwear (a B&W photo's hard hat, a chef's toque) — expected
+given limited headwear diversity in training data.
 
 ## What I would do next
 
@@ -91,11 +101,13 @@ populate after Phase 5)*
 
 ## Dataset licences and attribution
 
-- **SHWD** (Safety Helmet Wearing Dataset) — primary training set. Verify licence terms for your
-  use case before redistribution; not included in this repo (`scripts/download_data.sh`).
+- **`vodan37/yolo-helmethead`** (Kaggle mirror of SHWD, used as the primary training set) —
+  licensed **GNU LGPL 3.0** per Kaggle's own listing at download time. Verify this hasn't changed
+  before redistributing anything derived from it; not included in this repo
+  (`scripts/download_data.sh`).
 - **SH17** — used only for zero-shot cross-dataset evaluation, no fine-tuning. Verify licence terms
   separately.
-- Neither dataset is committed to this repository. Run `make data` to fetch SHWD.
+- Neither dataset is committed to this repository. Run `make data` to fetch it.
 
 ---
 
@@ -109,9 +121,13 @@ populate after Phase 5)*
 ├── Dockerfile
 ├── docker-compose.yml
 ├── configs/
-│   └── data_shwd.yaml
+│   ├── data_shwd.yaml
+│   └── splits.json
+├── notebooks/
+│   └── colab_train.ipynb
 ├── scripts/
 │   ├── download_data.sh
+│   ├── prepare_shwd_raw.py
 │   ├── voc_to_yolo.py
 │   ├── make_splits.py
 │   ├── apply_splits.py
@@ -119,11 +135,17 @@ populate after Phase 5)*
 │   ├── prepare_cross_dataset.py
 │   ├── train.py
 │   ├── evaluate.py
-│   └── export_onnx.py
+│   ├── export_onnx.py
+│   └── find_failure_cases.py
 ├── siteguard/
 │   ├── tracker.py
 │   ├── video.py
 │   └── api.py
+├── models/
+│   └── best.onnx
+├── runs/ppe/
+│   ├── yolo11n/weights/{best,last}.pt
+│   └── yolo11s/weights/{best,last}.pt
 ├── reports/
 │   ├── benchmark.md
 │   └── failure_cases/
@@ -158,13 +180,13 @@ back into this repo (unzip into the repo root — it recreates `models/`, `repor
 ## Definition of done
 
 - [ ] `docker compose up` works on a clean machine with no manual steps
-- [ ] `make bench` regenerates the whole benchmark table from checkpoints
-- [ ] Both naive-split and honest-split numbers are published
-- [ ] Per-class AP reported everywhere, never aggregate mAP alone
+- [x] `make bench` regenerates the whole benchmark table from checkpoints
+- [ ] Both naive-split and honest-split numbers are published (only honest-split trained so far)
+- [x] Per-class AP reported everywhere, never aggregate mAP alone
 - [ ] Cross-dataset evaluation present with a documented class mapping
 - [ ] Own phone-photo test set labelled and reported
-- [ ] Latency measured with warmup and CUDA sync, on both CPU and GPU
-- [ ] 6+ annotated failure cases with explanations
-- [ ] Dataset licences stated; no dataset committed to git
-- [ ] At least one test (the tracker's violation logic)
+- [ ] Latency measured with warmup and CUDA sync, on both CPU and GPU (CPU done, no local GPU)
+- [x] 6+ annotated failure cases with explanations
+- [x] Dataset licences stated; no dataset committed to git
+- [x] At least one test (the tracker's violation logic)
 - [ ] README opens with a GIF
