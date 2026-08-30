@@ -1,0 +1,15 @@
+data/
+runs/
+yolon/
+yolos/
+notebooks/
+reports/
+configs/
+scripts/
+tests/
+.venv/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc
+models/*.pt

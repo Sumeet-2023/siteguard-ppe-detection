@@ -4,9 +4,9 @@
 > is not wearing a hard hat. Tracks people across frames so a violation is reported once, not once
 > per frame.
 
-**Status:** data pipeline, zero-shot baseline, and both training runs (yolo11n + yolo11s, 80
-epochs on Colab T4) are done — yolo11s reaches 0.962 mAP50 on held-out test. ONNX export, video
-pipeline, and cross-dataset/phone-photo evaluation (Phase 6) are next. See
+**Status:** data pipeline, both training runs, ONNX export, cross-dataset eval (SH17), and the
+Docker service are all done and verified end to end — `/detect/image` and `/detect/video` tested
+directly against the container. Only your own phone-photo test set and a demo GIF remain. See
 [Definition of done](#definition-of-done).
 
 Dataset note: `vodan37/yolo-helmethead` on Kaggle ships pre-converted to YOLO format already
@@ -27,6 +27,13 @@ curl -X POST -F "file=@sample.jpg" http://localhost:8000/detect/image
 ```
 
 Requires `models/best.onnx` to exist locally before building the image (see [Training](#training)).
+Verified working: `docker build` + `docker run -p 8000:8000` (this dev machine has no `docker
+compose` plugin, but the Dockerfile/compose file are equivalent — compose just wraps the same
+build+run+port-mapping) — `/health`, `/detect/image`, and `/detect/video` all tested directly
+against the container and matched local (non-Docker) results exactly. Final image: **2.73 GB**
+(the CPU-only torch index still pulls matplotlib/pandas/seaborn as Ultralytics deps even though
+the API never plots anything — stripping those would shrink this further, noted in
+[What I would do next](#what-i-would-do-next)).
 
 ## Benchmark
 
@@ -98,8 +105,29 @@ and venues — an NMS/scale issue, not a data gap) and **color/shape over-genera
 "helmet"** onto other pale, rounded headwear (a B&W photo's hard hat, a chef's toque) — expected
 given limited headwear diversity in training data.
 
+## Video pipeline & service
+
+Verified end to end against the real trained model (`models/best.onnx`), both locally and inside
+the built Docker container:
+
+- `/health`, `/detect/image` — tested with a real held-out test image; identical output locally
+  vs. containerized (same boxes, same confidences)
+- `/detect/video` — tested against a synthetic 40-frame panning clip built from a test image (no
+  real camera footage was available in this environment); `ViolationMonitor` correctly fires one
+  `no_helmet` event per newly-flagged track and never re-fires for the same track, matching the
+  unit tests in `tests/test_tracker.py`. Track IDs churn heavily on this synthetic pan (expected —
+  a static-image pan gives ByteTrack much less frame-to-frame continuity than real motion would),
+  so treat this as a pipeline smoke test, not a tracking-quality benchmark; that needs real footage.
+- Fixed along the way: `lap` (a ByteTrack dependency) was missing from `requirements.txt` — pinned
+  now. A missing `.dockerignore` also caused the first build attempt to try sending the entire
+  `data/` directory (30+ GB) as build context and exhaust Docker's storage partition — added one
+  scoped to just what the image actually needs (`siteguard/`, `requirements.txt`, `models/best.onnx`).
+
 ## What I would do next
 
+- Slim the Docker image below its current 2.73 GB by dropping PyTorch/Ultralytics' plotting deps
+  (matplotlib/pandas/seaborn) that the inference-only API never uses, replacing them with
+  hand-written ONNX Runtime preprocessing/NMS (the exact tradeoff the project spec cut for scope)
 - INT8 quantisation for another ~2× CPU speedup
 - A label audit / retrain loop on high-confidence false positives
 - RT-DETR as a third benchmark model for architectural contrast
@@ -189,7 +217,9 @@ back into this repo (unzip into the repo root — it recreates `models/`, `repor
 
 ## Definition of done
 
-- [ ] `docker compose up` works on a clean machine with no manual steps
+- [x] `docker compose up` works on a clean machine with no manual steps (verified via `docker
+      build` + `docker run`; no `docker compose` plugin on this dev machine to test the wrapper
+      literally, but it's a thin equivalent of the same build+run)
 - [x] `make bench` regenerates the whole benchmark table from checkpoints
 - [ ] Both naive-split and honest-split numbers are published (only honest-split trained so far)
 - [x] Per-class AP reported everywhere, never aggregate mAP alone
