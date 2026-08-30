@@ -83,6 +83,35 @@ appearance — doesn't transfer to whatever counts as "helmet" in SH17's broader
 matches the pattern already seen in the failure-case analysis (Phase 5): the model leans on
 color/shape cues for "helmet" that don't generalise well outside its training distribution.
 
+## Phase 6 — "Own photos" substitute set (web-sourced, not phone-shot)
+
+**Read the caveat before the number.** The project spec wants 60-80 personally-shot phone photos
+with independently-verified ground truth. No camera/site access was available here, so this is a
+much smaller substitute: 9 CC-licensed photos from Wikimedia Commons (chosen over Pexels
+specifically, since SH17 already draws from Pexels), labeled via **model-assisted** review — I
+verified/corrected the model's own draft predictions rather than annotating from scratch. That
+means any head the model missed outright isn't in the ground truth at all, so **recall/mAP here is
+likely optimistic** and not directly comparable to the SHWD or SH17 numbers above, which used
+independently-sourced ground truth. Full methodology, licensing, and per-image notes:
+`reports/own_photos/README.md`.
+
+| Metric | Value |
+|---|---|
+| Images / boxes | 9 / 19 (16 helmet, 3 head) |
+| mAP50 | 0.8539 |
+| mAP50-95 | 0.8183 |
+| Precision | 0.9603 |
+| Recall | 0.8330 |
+| AP50 helmet | 0.9438 |
+| AP50 head | 0.7640 |
+
+What's actually trustworthy from this exercise (the precision-side findings, not the headline
+mAP): the review caught 2 false positives (a fan and a glove, both misfired as "helmet" at low
+confidence) and 1 real misclassification — a soft yellow cloth cap on a 1940s factory worker,
+called "helmet" at 0.89 confidence. That's the same color/shape over-generalization already found
+in Phase 5's failure cases and Phase 6's SH17 eval, now showing up a third time on genuinely novel
+images. Three independent pieces of evidence for the same finding is a real pattern, not noise.
+
 ## Naive vs honest split
 
 *(pending — would require retraining on a random image-level split for comparison; not yet run)*

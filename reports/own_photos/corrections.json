@@ -1,0 +1,12 @@
+{
+  "_comment": "Manual review corrections applied to yolo11s draft predictions (conf=0.15) on the 9 images in data/own_photos/raw/. 'keep' lists which draft detection indices are real (others were false positives, e.g. a fan and a glove misfired as 'helmet'). 'class_overrides' maps {index: corrected_class_id} for detections that were right about location but wrong about class (a cloth cap misclassified as helmet, corrected to head=1). See reports/own_photos/README.md for the full methodology and its recall-bias limitation.",
+  "commons_000.jpg": {"keep": [0, 1], "class_overrides": {}},
+  "commons_001.jpg": {"keep": [0, 1, 2], "class_overrides": {}},
+  "commons_003.jpg": {"keep": [0], "class_overrides": {}},
+  "commons_009.jpg": {"keep": [0], "class_overrides": {}},
+  "commons_010.jpg": {"keep": [0, 1], "class_overrides": {}},
+  "commons_016.jpg": {"keep": [0], "class_overrides": {}},
+  "commons_017.jpg": {"keep": [0, 1], "class_overrides": {}},
+  "commons_018.jpg": {"keep": [0, 1, 2, 3, 4, 5], "class_overrides": {}},
+  "commons_076.jpg": {"keep": [0], "class_overrides": {"0": 1}}
+}

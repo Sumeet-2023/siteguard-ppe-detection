@@ -73,12 +73,22 @@ instance-count verification). No fine-tuning.
 |---|---|---|---|
 | SHWD → SHWD (in-domain) | 0.9619 | 0.9738 | 0.9500 |
 | SHWD → SH17 (cross-domain) | 0.5241 | 0.2850 | 0.7631 |
-| SHWD → my own photos | TBD |  |  |
+| SHWD → "own photos" (9 web-sourced images — see caveat) | 0.8539* | 0.9438* | 0.7640* |
 
 The drop isn't uniform: `head` generalises reasonably (-19pt) but `helmet` collapses (-68.8pt) —
 SH17's Pexels-sourced images span far more industries and headwear styles than SHWD's
 construction-focused "hard hat or bare head" framing, so the helmet detector doesn't transfer.
 Consistent with the failure-case finding that the model leans on color/shape cues for "helmet."
+
+**\*Read before trusting this row.** No camera/site access was available in this environment, so
+this isn't the 60-80 personally-shot phone photos the spec asks for — it's 9 CC-licensed Wikimedia
+Commons images, labeled via *model-assisted* review (I corrected the model's own draft predictions
+rather than annotating from scratch), which means recall/mAP here is likely optimistic and not
+directly comparable to the two rows above. What is trustworthy: the review caught 2 false
+positives and 1 real misclassification — a soft cloth cap called "helmet" at 0.89 confidence — the
+same color/shape over-generalization bug showing up for a third independent time (Phase 5's
+failure cases, the SH17 eval, now this). Full methodology and per-image licensing/attribution:
+[`reports/own_photos/README.md`](reports/own_photos/README.md).
 
 ## Naive vs honest split
 
@@ -171,6 +181,8 @@ the built Docker container:
 │   ├── apply_splits.py
 │   ├── baseline_zeroshot.py
 │   ├── prepare_cross_dataset.py
+│   ├── prepare_own_photos.py
+│   ├── build_own_photos_labels.py
 │   ├── train.py
 │   ├── evaluate.py
 │   ├── export_onnx.py
@@ -186,7 +198,11 @@ the built Docker container:
 │   └── yolo11s/weights/{best,last}.pt
 ├── reports/
 │   ├── benchmark.md
-│   └── failure_cases/
+│   ├── failure_cases/
+│   └── own_photos/
+│       ├── README.md
+│       ├── corrections.json
+│       └── draft_preds.json
 └── tests/
     └── test_tracker.py
 ```
@@ -224,7 +240,8 @@ back into this repo (unzip into the repo root — it recreates `models/`, `repor
 - [ ] Both naive-split and honest-split numbers are published (only honest-split trained so far)
 - [x] Per-class AP reported everywhere, never aggregate mAP alone
 - [x] Cross-dataset evaluation present with a documented class mapping
-- [ ] Own phone-photo test set labelled and reported
+- [~] Own phone-photo test set labelled and reported — substituted with 9 web-sourced images
+      (no camera access available); see the caveat in the Generalisation study section
 - [ ] Latency measured with warmup and CUDA sync, on both CPU and GPU (CPU done, no local GPU)
 - [x] 6+ annotated failure cases with explanations
 - [x] Dataset licences stated; no dataset committed to git
