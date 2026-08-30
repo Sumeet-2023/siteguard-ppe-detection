@@ -1,23 +1,14 @@
 # SiteGuard — PPE Detection & Video Inference Service
 
-> A construction-site PPE compliance detector: given an image or video, find people and flag who
-> is not wearing a hard hat. Tracks people across frames so a violation is reported once, not once
-> per frame.
+> Detects people in images/video and flags who isn't wearing a hard hat. Tracks people across
+> frames so each violation is reported once, not once per frame.
 
-**Status:** data pipeline, both training runs, ONNX export, cross-dataset eval (SH17), and the
-Docker service are all done and verified end to end — `/detect/image` and `/detect/video` tested
-directly against the container. Only your own phone-photo test set and a demo GIF remain. See
-[Definition of done](#definition-of-done).
-
-Dataset note: `vodan37/yolo-helmethead` on Kaggle ships pre-converted to YOLO format already
-(not VOC XML) and combines multiple sources into ~22.8k images — larger and less imbalanced
-(~2:1 head:helmet) than the original 7.5k-image SHWD the project spec describes. Its own
-train/valid/test split is discarded in favor of our group-disjoint pHash split
-(`scripts/prepare_shwd_raw.py` flattens + remaps classes, then `make_splits.py` +
-`apply_splits.py` do the honest split).
+**Status:** Data pipeline, both training runs, ONNX export, cross-dataset eval, and the Docker
+service are all done and verified. Only the naive-split comparison and a demo GIF are missing.
+See [Definition of done](#definition-of-done).
 
 <!-- ![demo](reports/demo.gif) -->
-*(demo GIF goes here once a trained model produces one — see Phase 8)*
+*(demo GIF goes here once a trained model produces one)*
 
 ## Quickstart
 
@@ -26,19 +17,20 @@ docker compose up
 curl -X POST -F "file=@sample.jpg" http://localhost:8000/detect/image
 ```
 
-Requires `models/best.onnx` to exist locally before building the image (see [Training](#training)).
-Verified working: `docker build` + `docker run -p 8000:8000` (this dev machine has no `docker
-compose` plugin, but the Dockerfile/compose file are equivalent — compose just wraps the same
-build+run+port-mapping) — `/health`, `/detect/image`, and `/detect/video` all tested directly
-against the container and matched local (non-Docker) results exactly. Final image: **2.73 GB**
-(the CPU-only torch index still pulls matplotlib/pandas/seaborn as Ultralytics deps even though
-the API never plots anything — stripping those would shrink this further, noted in
-[What I would do next](#what-i-would-do-next)).
+Requires `models/best.onnx` to exist locally before building the image. Verified working (build +
+run + `/health`, `/detect/image`, `/detect/video`) — details in
+[Video pipeline & service](#video-pipeline--service). Image size: **2.73 GB**.
+
+## Dataset
+
+Training data is `vodan37/yolo-helmethead` on Kaggle — a mirror of SHWD, but already in YOLO
+format (not VOC XML as the original spec assumed) and larger (~22.8k images, ~2:1 head:helmet)
+than the original 7.5k-image SHWD. Its pre-made split is discarded in favor of our own
+group-disjoint pHash split (`scripts/prepare_shwd_raw.py`, `make_splits.py`, `apply_splits.py`).
 
 ## Benchmark
 
-**Zero-shot COCO baseline** (Phase 3, already run — see `reports/benchmark.md`): `yolo11s.pt`
-against our test split, filtered to COCO class `person`.
+**Zero-shot COCO baseline** — `yolo11s.pt`, untrained on this task, against our test split:
 
 | Metric | Value |
 |---|---|
@@ -46,59 +38,50 @@ against our test split, filtered to COCO class `person`.
 | Precision | 0.0151 |
 | Recall | 0.279 |
 
-Recall of 0.28 shows COCO's person detector does find people in these frames; the near-zero mAP50
-is a box-geometry mismatch — COCO `person` is full-body, SHWD ground truth is a tight head/helmet
-region, so IoU ≥ 0.5 is essentially never reached. This is the case for training PPE-specific
-boxes rather than reusing generic person detection.
+Recall of 0.28 shows COCO's person detector does find people. The near-zero mAP50 is a box shape
+mismatch — COCO `person` boxes cover the full body, but ground truth here is a tight head/helmet
+box, so they rarely overlap enough to count. This is why the task needs its own trained model.
 
-**Trained models** — 80 epochs, imgsz=640, trained on Colab T4, evaluated on this (CPU-only)
-machine against the held-out test split (see `reports/benchmark.md` for full detail):
+**Trained models** — 80 epochs, imgsz=640, trained on Colab T4, evaluated here on CPU:
 
 | Model | Size (MB) | mAP50 | mAP50-95 | AP50 helmet | AP50 head | CPU p50 (ms) | CPU FPS |
 |---|---|---|---|---|---|---|---|
 | yolo11n | 5.5 | 0.9487 | 0.5795 | 0.9665 | 0.9309 | 82.59 | 10.1 |
 | yolo11s | 19.2 | 0.9619 | 0.6000 | 0.9738 | 0.9500 | 205.22 | 4.8 |
 
-yolo11s wins on every accuracy metric but is 2.5x slower and 3.5x larger. For CPU-only edge
-deployment, yolo11n is within 1.3pt mAP50 of yolo11s at less than half the latency — a real
-tradeoff, not a clear winner either way. GPU latency not yet measured (would need to run on Colab).
+yolo11s wins on accuracy but is 2.5x slower and 3.5x larger. For CPU-only edge use, yolo11n is
+within 1.3pt mAP50 of yolo11s at less than half the latency — a real tradeoff either way. GPU
+latency isn't measured yet.
 
 ## Generalisation study
 
-`yolo11s`, zero-shot on SH17 (8,099 images, 17 classes remapped to our `{helmet, head}` scheme —
-see `scripts/prepare_cross_dataset.py` and `reports/benchmark.md` for the full class mapping and
-instance-count verification). No fine-tuning.
+`yolo11s`, zero-shot on SH17 (8,099 images, 17 classes mapped down to our `{helmet, head}`
+scheme — see `scripts/prepare_cross_dataset.py`). No fine-tuning.
 
 | Train → Test | mAP50 | AP50 helmet | AP50 head |
 |---|---|---|---|
 | SHWD → SHWD (in-domain) | 0.9619 | 0.9738 | 0.9500 |
 | SHWD → SH17 (cross-domain) | 0.5241 | 0.2850 | 0.7631 |
-| SHWD → "own photos" (9 web-sourced images — see caveat) | 0.8539* | 0.9438* | 0.7640* |
+| SHWD → "own photos" (9 web-sourced images*) | 0.8539 | 0.9438 | 0.7640 |
 
-The drop isn't uniform: `head` generalises reasonably (-19pt) but `helmet` collapses (-68.8pt) —
-SH17's Pexels-sourced images span far more industries and headwear styles than SHWD's
-construction-focused "hard hat or bare head" framing, so the helmet detector doesn't transfer.
-Consistent with the failure-case finding that the model leans on color/shape cues for "helmet."
+The drop isn't even: `head` holds up (-19pt) but `helmet` collapses (-68.8pt). SH17 covers far
+more industries and headwear styles than SHWD's narrow "hard hat or bare head" framing, so the
+helmet detector doesn't transfer. This matches the failure-case finding below: the model leans on
+color/shape, not real PPE features.
 
-**\*Read before trusting this row.** No camera/site access was available in this environment, so
-this isn't the 60-80 personally-shot phone photos the spec asks for — it's 9 CC-licensed Wikimedia
-Commons images, labeled via *model-assisted* review (I corrected the model's own draft predictions
-rather than annotating from scratch), which means recall/mAP here is likely optimistic and not
-directly comparable to the two rows above. What is trustworthy: the review caught 2 false
-positives and 1 real misclassification — a soft cloth cap called "helmet" at 0.89 confidence — the
-same color/shape over-generalization bug showing up for a third independent time (Phase 5's
-failure cases, the SH17 eval, now this). Full methodology and per-image licensing/attribution:
-[`reports/own_photos/README.md`](reports/own_photos/README.md).
+**\*About that third row:** no camera was available, so this isn't the 60-80 personally-shot phone
+photos the spec wants — it's 9 CC-licensed Wikimedia images, labeled by correcting the model's own
+predictions rather than annotating from scratch. That makes recall/mAP here optimistic and not
+directly comparable to the rows above. What *is* trustworthy: the review caught 2 false positives
+and one real error — a cloth cap called "helmet" at 0.89 confidence, the same color/shape bias
+seen twice already. Full details: [`reports/own_photos/README.md`](reports/own_photos/README.md).
 
 ## Naive vs honest split
 
-Scraped datasets like SHWD contain near-duplicate images (same stock photo, different resolution).
-A random image-level split leaks duplicates across train/val/test and inflates mAP. This project
-splits by perceptual-hash group instead (`scripts/make_splits.py`).
-
-Measured on the combined 22,789-image pool: **1,234 duplicate images (5.4%)** collapse into
-21,555 pHash groups. That's the leakage a naive random split would scatter across train/val/test.
-mAP numbers for both split strategies are reported below once training completes.
+Scraped datasets like SHWD contain near-duplicate images. A random split leaks duplicates across
+train/val/test and inflates accuracy. This project splits by perceptual-hash group instead
+(`scripts/make_splits.py`): **1,234 of 22,789 images (5.4%) are duplicates**, now kept in the same
+split. Comparison numbers below need a second training run on a naive split, not yet done.
 
 | Split strategy | mAP50 |
 |---|---|
@@ -107,55 +90,44 @@ mAP numbers for both split strategies are reported below once training completes
 
 ## Failure analysis
 
-8 worst cases from the test split, auto-selected by `scripts/find_failure_cases.py` (greedy
-IoU-matching against ground truth, ranked by missed/extra/misclassified boxes) — captions and
-images in [`reports/failure_cases/`](reports/failure_cases/README.md). Two distinct failure modes
-emerge: **duplicate/overlapping boxes on densely packed heads** (consistent across camera angles
-and venues — an NMS/scale issue, not a data gap) and **color/shape over-generalization of
-"helmet"** onto other pale, rounded headwear (a B&W photo's hard hat, a chef's toque) — expected
-given limited headwear diversity in training data.
+8 worst cases from the test split, picked by `scripts/find_failure_cases.py` (matches predictions
+to ground truth, ranks by missed/extra/wrong-class boxes). Captions and images in
+[`reports/failure_cases/`](reports/failure_cases/README.md). Two failure modes stand out:
+**duplicate boxes on packed heads** (same bug across many camera angles — an NMS issue, not a data
+gap) and **"helmet" over-applied to any pale, round headwear** (a B&W photo's hard hat, a chef's
+toque) — expected given how little headwear variety is in the training data.
 
 ## Video pipeline & service
 
-Verified end to end against the real trained model (`models/best.onnx`), both locally and inside
-the built Docker container:
+Verified against the real model (`models/best.onnx`), locally and in Docker:
 
-- `/health`, `/detect/image` — tested with a real held-out test image; identical output locally
-  vs. containerized (same boxes, same confidences)
-- `/detect/video` — tested against a synthetic 40-frame panning clip built from a test image (no
-  real camera footage was available in this environment); `ViolationMonitor` correctly fires one
-  `no_helmet` event per newly-flagged track and never re-fires for the same track, matching the
-  unit tests in `tests/test_tracker.py`. Track IDs churn heavily on this synthetic pan (expected —
-  a static-image pan gives ByteTrack much less frame-to-frame continuity than real motion would),
-  so treat this as a pipeline smoke test, not a tracking-quality benchmark; that needs real footage.
-- Fixed along the way: `lap` (a ByteTrack dependency) was missing from `requirements.txt` — pinned
-  now. A missing `.dockerignore` also caused the first build attempt to try sending the entire
-  `data/` directory (30+ GB) as build context and exhaust Docker's storage partition — added one
-  scoped to just what the image actually needs (`siteguard/`, `requirements.txt`, `models/best.onnx`).
+- `/health`, `/detect/image` — same output locally and in the container
+- `/detect/video` — tested with a synthetic panning clip (no real footage was available).
+  `ViolationMonitor` fires one `no_helmet` event per newly-flagged track and never repeats,
+  matching `tests/test_tracker.py`. Track IDs churn a lot on this synthetic clip since a still-image
+  pan gives far less continuity than real motion — treat this as a smoke test, not a tracking
+  benchmark.
+- Two bugs fixed along the way: `lap` (a ByteTrack dependency) was missing from
+  `requirements.txt`; a missing `.dockerignore` made the first build try to send the whole 30+ GB
+  `data/` folder as build context. Both fixed.
 
 ## What I would do next
 
-- Slim the Docker image below its current 2.73 GB by dropping PyTorch/Ultralytics' plotting deps
-  (matplotlib/pandas/seaborn) that the inference-only API never uses, replacing them with
-  hand-written ONNX Runtime preprocessing/NMS (the exact tradeoff the project spec cut for scope)
-- INT8 quantisation for another ~2× CPU speedup
+- Slim the Docker image below 2.73 GB by dropping unused plotting deps (matplotlib/pandas/seaborn)
+  and hand-writing ONNX preprocessing/NMS
+- INT8 quantisation for another ~2x CPU speedup
 - A label audit / retrain loop on high-confidence false positives
-- RT-DETR as a third benchmark model for architectural contrast
-- Head-size-stratified metrics (small objects are where these models actually fail)
-- Real edge deployment measurement on a Raspberry Pi 5
+- RT-DETR as a third benchmark model
+- Head-size-stratified metrics (small objects are where these models fail most)
+- Real edge deployment numbers on a Raspberry Pi 5
 
-## Dataset licences and attribution
+## Dataset licences
 
-- **`vodan37/yolo-helmethead`** (Kaggle mirror of SHWD, used as the primary training set) —
-  licensed **GNU LGPL 3.0** per Kaggle's own listing at download time. Verify this hasn't changed
-  before redistributing anything derived from it; not included in this repo
-  (`scripts/download_data.sh`).
-- **SH17** (`mugheesahmad/sh17-dataset-for-ppe-detection` on Kaggle) — licensed **CC BY-NC-SA 4.0**
-  per the dataset maintainer's GitHub repo (github.com/ahmadmughees/SH17dataset); sourced from
-  Pexels imagery. Used only for zero-shot cross-dataset evaluation, no fine-tuning — the
-  non-commercial/share-alike terms matter more if you ever train on it directly.
-- Neither dataset is committed to this repository. Run `make data` for SHWD; SH17 was fetched
-  ad hoc for the cross-dataset eval (`kaggle datasets download -d mugheesahmad/sh17-dataset-for-ppe-detection`).
+- **`vodan37/yolo-helmethead`** (Kaggle, primary training set) — **GNU LGPL 3.0** per Kaggle's
+  listing. Not included in this repo (`scripts/download_data.sh` fetches it).
+- **SH17** (`mugheesahmad/sh17-dataset-for-ppe-detection` on Kaggle) — **CC BY-NC-SA 4.0**,
+  sourced from Pexels. Used only for zero-shot eval, no fine-tuning.
+- Neither dataset is committed here. `make data` fetches SHWD; SH17 was a one-off download.
 
 ---
 
@@ -213,36 +185,33 @@ the built Docker container:
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-make data           # download the SHWD mirror, flatten + remap classes
+make data            # download the SHWD mirror, flatten + remap classes
 make splits          # group-disjoint train/val/test split by pHash
 make apply-splits    # materialise images/labels/{train,val,test}
 make baseline        # zero-shot COCO person-detection sanity check
-make train           # train yolo11n and yolo11s (needs GPU for reasonable time)
-make bench           # accuracy + latency benchmark table -> reports/benchmark.md
+make train           # train yolo11n and yolo11s (needs a GPU for reasonable time)
+make bench           # accuracy + latency table -> reports/benchmark.md
 make export          # export best model to ONNX
 make serve           # build and run the Docker image
 ```
 
-No GPU locally, so Phase 4 (`make train`) runs on Colab instead: upload
-[`notebooks/colab_train.ipynb`](notebooks/colab_train.ipynb), set the runtime to a GPU, and run
-top to bottom. It's self-contained — it writes out and runs the same `scripts/*.py` shown above
-(so it reproduces the identical honest split, byte-for-byte, given the same seed and source
-data), trains both models, benchmarks, exports ONNX, and packages everything into a zip to bring
-back into this repo (unzip into the repo root — it recreates `models/`, `reports/`, and
-`configs/splits.json`).
+No local GPU, so `make train` runs on Colab instead: upload
+[`notebooks/colab_train.ipynb`](notebooks/colab_train.ipynb), set the runtime to GPU, and run it
+top to bottom. It writes out and runs the same scripts shown above, so it reproduces the same
+split given the same seed and source data. It trains both models, benchmarks, exports ONNX, and
+zips everything for you to bring back into this repo.
 
 ## Definition of done
 
-- [x] `docker compose up` works on a clean machine with no manual steps (verified via `docker
-      build` + `docker run`; no `docker compose` plugin on this dev machine to test the wrapper
-      literally, but it's a thin equivalent of the same build+run)
-- [x] `make bench` regenerates the whole benchmark table from checkpoints
-- [ ] Both naive-split and honest-split numbers are published (only honest-split trained so far)
+- [x] `docker compose up` works with no manual steps (verified via `docker build` + `docker run`;
+      no compose plugin on this dev machine, but it's a thin wrapper over the same build+run)
+- [x] `make bench` regenerates the benchmark table from checkpoints
+- [ ] Naive-split and honest-split numbers both published (only honest-split trained so far)
 - [x] Per-class AP reported everywhere, never aggregate mAP alone
-- [x] Cross-dataset evaluation present with a documented class mapping
-- [~] Own phone-photo test set labelled and reported — substituted with 9 web-sourced images
-      (no camera access available); see the caveat in the Generalisation study section
-- [ ] Latency measured with warmup and CUDA sync, on both CPU and GPU (CPU done, no local GPU)
+- [x] Cross-dataset evaluation with a documented class mapping
+- [~] Own phone-photo test set — substituted with 9 web-sourced images (no camera available); see
+      the caveat above
+- [ ] Latency measured with warmup and CUDA sync, CPU and GPU (CPU done, no local GPU)
 - [x] 6+ annotated failure cases with explanations
 - [x] Dataset licences stated; no dataset committed to git
 - [x] At least one test (the tracker's violation logic)
