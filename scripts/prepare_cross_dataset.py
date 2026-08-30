@@ -1,28 +1,33 @@
 """Remap SH17 (17-class YOLO format) labels down to our 2-class scheme
 (helmet / head) so a model trained on SHWD can be evaluated zero-shot on it.
 
-SH17 class names, as published: person, ear, ear-mufs, face, face-guard,
-face-mask, foot, tool, glasses, gloves, helmet, hands, head, medical-suit,
-shoes, safety-suit, safety-vest. Verify this list against your actual
-download's data.yaml -- ordering/spelling has varied between releases.
+SH17 class order, per the dataset maintainer's own sh17.yaml
+(github.com/ahmadmughees/SH17dataset/blob/master/sh17.yaml) -- verified
+against instance counts on the actual Kaggle download (helmet=927,
+head=11985, totaling 75,994 instances across all 17 classes, matching the
+paper exactly):
+  0 person, 1 ear, 2 ear-mufs, 3 face, 4 face-guard, 5 face-mask, 6 foot,
+  7 tool, 8 glasses, 9 gloves, 10 helmet, 11 hands, 12 head,
+  13 medical-suit, 14 shoes, 15 safety-suit, 16 safety-vest
 
 Only 'helmet' and 'head' carry semantics comparable to our task; every other
-box is dropped. Write the mapping down explicitly (this file) rather than
-burying it silently in eval code.
+box is dropped. This dataset ships flat (images/, labels/, no train/val/test
+split) since Phase 6 uses the entire thing as a zero-shot test set -- no
+fine-tuning, so no split is needed.
 """
 import argparse
-import shutil
 from pathlib import Path
 
-# SH17 class index -> name, per the dataset's published data.yaml.
 SH17_NAMES = {
     0: "person", 1: "ear", 2: "ear-mufs", 3: "face", 4: "face-guard",
     5: "face-mask", 6: "foot", 7: "tool", 8: "glasses", 9: "gloves",
     10: "helmet", 11: "hands", 12: "head", 13: "medical-suit",
     14: "shoes", 15: "safety-suit", 16: "safety-vest",
 }
-# SH17 name -> our class id (0=helmet, 1=head). Everything else is dropped.
+# SH17 name -> our class id (0=helmet, 1=head), matching configs/data_shwd.yaml.
 TO_OURS = {"helmet": 0, "head": 1}
+
+IMG_EXTS = {".jpg", ".jpeg", ".png"}
 
 
 def remap_label_file(src: Path, dst: Path) -> tuple[int, int]:
@@ -45,37 +50,41 @@ def remap_label_file(src: Path, dst: Path) -> tuple[int, int]:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sh17-root", type=Path, required=True,
-                     help="root containing images/ and labels/")
+    ap.add_argument("--images-dir", type=Path, required=True)
+    ap.add_argument("--labels-dir", type=Path, required=True)
     ap.add_argument("--out-root", type=Path, default=Path("data/sh17_remapped"))
-    ap.add_argument("--split", default="test")
     a = ap.parse_args()
 
-    img_dir = a.sh17_root / "images" / a.split
-    label_dir = a.sh17_root / "labels" / a.split
+    total_kept = total_dropped = n_images = n_no_relevant_boxes = 0
+    images = sorted(p for p in a.images_dir.iterdir() if p.suffix.lower() in IMG_EXTS)
 
-    total_kept = total_dropped = n_images = 0
-    for img in sorted(img_dir.glob("*.jpg")) + sorted(img_dir.glob("*.png")):
-        label_src = label_dir / f"{img.stem}.txt"
+    for img in images:
+        label_src = a.labels_dir / f"{img.stem}.txt"
         if not label_src.exists():
             continue
-        kept, dropped = remap_label_file(
-            label_src, a.out_root / "labels" / a.split / f"{img.stem}.txt")
-        dst_img = a.out_root / "images" / a.split / img.name
+
+        dst_label = a.out_root / "labels" / "test" / f"{img.stem}.txt"
+        kept, dropped = remap_label_file(label_src, dst_label)
+        if kept == 0:
+            n_no_relevant_boxes += 1
+
+        dst_img = a.out_root / "images" / "test" / img.name
         dst_img.parent.mkdir(parents=True, exist_ok=True)
-        if not dst_img.exists():
-            shutil.copy(img, dst_img)
+        if not dst_img.exists() and not dst_img.is_symlink():
+            dst_img.symlink_to(img.resolve())
+
         total_kept += kept
         total_dropped += dropped
         n_images += 1
 
     print(f"{n_images} images: {total_kept} boxes remapped to helmet/head, "
-          f"{total_dropped} boxes dropped (other SH17 classes)")
+          f"{total_dropped} boxes dropped (other SH17 classes), "
+          f"{n_no_relevant_boxes} images end up with zero helmet/head boxes")
 
     yaml_path = a.out_root / "data_sh17.yaml"
     yaml_path.write_text(
         f"path: {a.out_root.resolve()}\n"
-        f"train: images/{a.split}\nval: images/{a.split}\ntest: images/{a.split}\n"
+        "train: images/test\nval: images/test\ntest: images/test\n"
         "names:\n  0: helmet\n  1: head\n"
     )
     print(f"Wrote {yaml_path}")

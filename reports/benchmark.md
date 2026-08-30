@@ -59,6 +59,30 @@ deployment win, though the ONNX file itself is ~2x larger on disk (37.9 vs 19.2 
 using any of PyTorch's weight compression. `models/best.onnx` (used by the FastAPI service) is
 this ONNX export.
 
+## Phase 6 — Cross-dataset generalisation (SH17, zero-shot)
+
+`yolo11s` (trained only on SHWD, no fine-tuning) evaluated against the entire SH17 dataset
+(8,099 images) — 17 classes remapped down to our `{helmet, head}` scheme via
+`scripts/prepare_cross_dataset.py`, per the maintainer's own `sh17.yaml`
+(github.com/ahmadmughees/SH17dataset), verified against instance counts on the actual download
+(927 helmet + 11,985 head = 12,912 boxes retained; 63,082 dropped from the other 15 classes).
+1,565/8,099 images end up with zero helmet/head boxes after remapping (pure negatives).
+
+| Train → Test | mAP50 | mAP50-95 | AP50 helmet | AP50 head |
+|---|---|---|---|---|
+| SHWD → SHWD (in-domain) | 0.9619 | 0.6000 | 0.9738 | 0.9500 |
+| SHWD → SH17 (cross-domain, zero-shot) | 0.5241 | 0.2702 | 0.2850 | 0.7631 |
+
+A 43.8pt mAP50 drop crossing domains — this is the expected result, not a failure of the model.
+Notably the drop is not uniform across classes: `head` holds up reasonably (0.95 → 0.76, -19pt)
+since "a person's head" generalises across photo styles, but `helmet` collapses (0.97 → 0.29,
+-68.8pt). SH17's images (Pexels stock photography across many industries — farming, firefighting,
+medical, general labor) show far more headwear variety than SHWD's construction-site-focused
+"hard hat or nothing" framing, so the model's helmet detector — tuned to SHWD's specific hard-hat
+appearance — doesn't transfer to whatever counts as "helmet" in SH17's broader label set. This
+matches the pattern already seen in the failure-case analysis (Phase 5): the model leans on
+color/shape cues for "helmet" that don't generalise well outside its training distribution.
+
 ## Naive vs honest split
 
 *(pending — would require retraining on a random image-level split for comparison; not yet run)*

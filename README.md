@@ -58,13 +58,20 @@ tradeoff, not a clear winner either way. GPU latency not yet measured (would nee
 
 ## Generalisation study
 
-*(populate after Phase 6 — cross-dataset eval on SH17 and your own phone photos)*
+`yolo11s`, zero-shot on SH17 (8,099 images, 17 classes remapped to our `{helmet, head}` scheme —
+see `scripts/prepare_cross_dataset.py` and `reports/benchmark.md` for the full class mapping and
+instance-count verification). No fine-tuning.
 
-| Train → Test | mAP50 |
-|---|---|
-| SHWD → SHWD (in-domain) | TBD |
-| SHWD → SH17 (cross-domain) | TBD |
-| SHWD → my own photos | TBD |
+| Train → Test | mAP50 | AP50 helmet | AP50 head |
+|---|---|---|---|
+| SHWD → SHWD (in-domain) | 0.9619 | 0.9738 | 0.9500 |
+| SHWD → SH17 (cross-domain) | 0.5241 | 0.2850 | 0.7631 |
+| SHWD → my own photos | TBD |  |  |
+
+The drop isn't uniform: `head` generalises reasonably (-19pt) but `helmet` collapses (-68.8pt) —
+SH17's Pexels-sourced images span far more industries and headwear styles than SHWD's
+construction-focused "hard hat or bare head" framing, so the helmet detector doesn't transfer.
+Consistent with the failure-case finding that the model leans on color/shape cues for "helmet."
 
 ## Naive vs honest split
 
@@ -105,9 +112,12 @@ given limited headwear diversity in training data.
   licensed **GNU LGPL 3.0** per Kaggle's own listing at download time. Verify this hasn't changed
   before redistributing anything derived from it; not included in this repo
   (`scripts/download_data.sh`).
-- **SH17** — used only for zero-shot cross-dataset evaluation, no fine-tuning. Verify licence terms
-  separately.
-- Neither dataset is committed to this repository. Run `make data` to fetch it.
+- **SH17** (`mugheesahmad/sh17-dataset-for-ppe-detection` on Kaggle) — licensed **CC BY-NC-SA 4.0**
+  per the dataset maintainer's GitHub repo (github.com/ahmadmughees/SH17dataset); sourced from
+  Pexels imagery. Used only for zero-shot cross-dataset evaluation, no fine-tuning — the
+  non-commercial/share-alike terms matter more if you ever train on it directly.
+- Neither dataset is committed to this repository. Run `make data` for SHWD; SH17 was fetched
+  ad hoc for the cross-dataset eval (`kaggle datasets download -d mugheesahmad/sh17-dataset-for-ppe-detection`).
 
 ---
 
@@ -183,7 +193,7 @@ back into this repo (unzip into the repo root — it recreates `models/`, `repor
 - [x] `make bench` regenerates the whole benchmark table from checkpoints
 - [ ] Both naive-split and honest-split numbers are published (only honest-split trained so far)
 - [x] Per-class AP reported everywhere, never aggregate mAP alone
-- [ ] Cross-dataset evaluation present with a documented class mapping
+- [x] Cross-dataset evaluation present with a documented class mapping
 - [ ] Own phone-photo test set labelled and reported
 - [ ] Latency measured with warmup and CUDA sync, on both CPU and GPU (CPU done, no local GPU)
 - [x] 6+ annotated failure cases with explanations
